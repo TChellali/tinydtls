@@ -1,3 +1,5 @@
+# Orange Live Objects specific implemanttation
+
 This Arduino Board can support the Orange implementation on IOTEROP sdk , and it must be came with MKRENV sensors – temperature humidity, pressure and light control.
 
 # About tinydtls
@@ -109,7 +111,8 @@ make
 mv libtinydtls.so libtinydtls.dll # Apply Windows file extension
 ```
 ## Arduino platform
-This library is a fork to adapt
+This library is a fork to adapt DTLS/Coap/Lwm2m specific implementation
+
 # License
 
 Copyright (c) 2011–2022 Olaf Bergmann (TZI) and others.
