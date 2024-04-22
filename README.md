@@ -1,4 +1,4 @@
-# Orange Live Objects specific implemantation
+# Orange Live Objects specific implementation
 
 This Arduino Board can support the Orange implementation on IOTEROP sdk , and it must be came with MKRENV sensors – temperature humidity, pressure and light control.
 
