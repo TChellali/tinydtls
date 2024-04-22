@@ -24,15 +24,6 @@
 #include "global.h"
 #include "session.h"
 
-#ifdef WITH_ZEPHYR
-#include <zephyr/logging/log.h>
-#endif /* WITH_ZEPHYR */
-
-#ifdef RIOT_VERSION
-#include "log.h"
-#include "od.h"
-#endif
-
 #ifdef WITH_CONTIKI
 # ifndef DEBUG
 #  define DEBUG DEBUG_PRINT
@@ -78,38 +69,17 @@ log_t dtls_get_log_level(void);
 /** Sets the log level to the specified value. */
 void dtls_set_log_level(log_t level);
 
-/**
- * Logging callback handler definition.
- *
- * Note: The maximum message length is controlled by the size of the definition
- * for DTLS_DEBUG_BUF_SIZE (default 128) less 1 for the zero termination.
- *
- * @param level One of the DTLS_LOG_* values.
- * @param message Zero-terminated string message to log.
- */
-typedef void (*dtls_log_handler_t) (log_t level, const char *message);
-
-/**
- * Add a custom log callback handler.
- *
- * @param app_handler The logging handler to use or @p NULL to use default handler.
- */
-void dtls_set_log_handler(dtls_log_handler_t app_handler);
-
 /** 
  * Writes the given text to \c stdout. The text is output only when \p
  * level is below or equal to the log level that set by
  * set_log_level(). */
 #ifdef HAVE_VPRINTF
-#if (defined(__GNUC__) && !defined(__MINGW32__))
-void dsrv_log(log_t level, const char *format, ...) __attribute__ ((format(printf, 2, 3)));
-#else /* !__GNUC__ && !__MINGW32__ */
-void dsrv_log(log_t level, const char *format, ...);
-#endif /* !__GNUC__ && !__MINGW32__ */
+void dsrv_log(log_t level, const char *functionName, unsigned int line, char *format, ...);
 #else
 #define dsrv_log(level, format, ...) PRINTF(format, ##__VA_ARGS__)
 #endif
 
+#ifndef NDEBUG
 /** dumps packets in usual hexdump format */
 void hexdump(const unsigned char *packet, int length);
 
@@ -120,37 +90,56 @@ void dtls_dsrv_hexdump_log(log_t level, const char *name, const unsigned char *b
 
 void dtls_dsrv_log_addr(log_t level, const char *name, const session_t *addr);
 
+#else /* NDEBUG */
+
+static inline void hexdump(const unsigned char *packet, int length)
+{}
+
+static inline void dump(unsigned char *buf, size_t len)
+{}
+
+static inline void
+dtls_dsrv_hexdump_log(log_t level, const char *name, const unsigned char *buf, size_t length, int extend)
+{}
+
+static inline void
+dtls_dsrv_log_addr(log_t level, const char *name, const session_t *addr)
+{}
+
+#endif /* NDEBUG */
+
 /* A set of convenience macros for common log levels. */
-#ifdef WITH_ZEPHYR
-#define dtls_emerg(...) LOG_ERR(__VA_ARGS__)
-#define dtls_alert(...) LOG_ERR(__VA_ARGS__)
-#define dtls_crit(...) LOG_ERR(__VA_ARGS__)
-#define dtls_warn(...) LOG_WRN(__VA_ARGS__)
-#define dtls_notice(...) LOG_INF(__VA_ARGS__)
-#define dtls_info(...) LOG_INF(__VA_ARGS__)
-#define dtls_debug(...) LOG_DBG(__VA_ARGS__)
-#define dtls_debug_hexdump(name, buf, length) { LOG_DBG("%s (%zu bytes):", name, (size_t)(length)); LOG_HEXDUMP_DBG(buf, length, name); }
-#define dtls_debug_dump(name, buf, length) { LOG_DBG("%s (%zu bytes):", name, (size_t)(length)); LOG_HEXDUMP_DBG(buf, length, name); }
-#elif defined(RIOT_VERSION)
-#define dtls_emerg(...) LOG_ERROR(__VA_ARGS__)
-#define dtls_alert(...) LOG_ERROR(__VA_ARGS__)
-#define dtls_crit(...) LOG_ERROR(__VA_ARGS__)
-#define dtls_warn(...) LOG_WARNING(__VA_ARGS__)
-#define dtls_notice(...) LOG_INFO(__VA_ARGS__)
-#define dtls_info(...) LOG_INFO(__VA_ARGS__)
-#define dtls_debug(...) LOG_DEBUG(__VA_ARGS__)
-#define dtls_debug_hexdump(name, buf, length) { if (LOG_DEBUG <= LOG_LEVEL) { LOG_DEBUG("-= %s (%zu bytes) =-\n", name, (size_t)(length)); od_hex_dump(buf, length, 0); }}
-#define dtls_debug_dump(name, buf, length) { if (LOG_DEBUG <= LOG_LEVEL) { LOG_DEBUG("%s (%zu bytes):", name, (size_t)(length)); od_hex_dump(buf, length, 0); }}
-#else /* neither RIOT nor Zephyr */
-#define dtls_emerg(...) dsrv_log(DTLS_LOG_EMERG, __VA_ARGS__)
-#define dtls_alert(...) dsrv_log(DTLS_LOG_ALERT, __VA_ARGS__)
-#define dtls_crit(...) dsrv_log(DTLS_LOG_CRIT, __VA_ARGS__)
-#define dtls_warn(...) dsrv_log(DTLS_LOG_WARN, __VA_ARGS__)
-#define dtls_notice(...) dsrv_log(DTLS_LOG_NOTICE, __VA_ARGS__)
-#define dtls_info(...) dsrv_log(DTLS_LOG_INFO, __VA_ARGS__)
-#define dtls_debug(...) dsrv_log(DTLS_LOG_DEBUG, __VA_ARGS__)
 #define dtls_debug_hexdump(name, buf, length) dtls_dsrv_hexdump_log(DTLS_LOG_DEBUG, name, buf, length, 1)
 #define dtls_debug_dump(name, buf, length) dtls_dsrv_hexdump_log(DTLS_LOG_DEBUG, name, buf, length, 0)
+
+#if (IOWA_LOG_LEVEL >= IOWA_LOG_LEVEL_ERROR)
+#define dtls_emerg(...) dsrv_log(DTLS_LOG_EMERG, __func__, __LINE__, __VA_ARGS__)
+#define dtls_alert(...) dsrv_log(DTLS_LOG_ALERT, __func__, __LINE__, __VA_ARGS__)
+#define dtls_crit(...)  dsrv_log(DTLS_LOG_CRIT, __func__, __LINE__, __VA_ARGS__)
+#else
+#define dtls_emerg(...)
+#define dtls_alert(...)
+#define dtls_crit(...)
+#endif
+
+#if (IOWA_LOG_LEVEL >= IOWA_LOG_LEVEL_WARNING)
+#define dtls_warn(...) dsrv_log(DTLS_LOG_WARN, __func__, __LINE__, __VA_ARGS__)
+#else
+#define dtls_warn(...)
+#endif
+
+#if (IOWA_LOG_LEVEL >= IOWA_LOG_LEVEL_INFO)
+#define dtls_notice(...) dsrv_log(DTLS_LOG_NOTICE, __func__, __LINE__, __VA_ARGS__)
+#define dtls_info(...)   dsrv_log(DTLS_LOG_INFO, __func__, __LINE__, __VA_ARGS__)
+#else
+#define dtls_notice(...)
+#define dtls_info(...)
+#endif
+
+#if (IOWA_LOG_LEVEL >= IOWA_LOG_LEVEL_TRACE)
+#define dtls_debug(...) dsrv_log(DTLS_LOG_DEBUG, __func__, __LINE__, __VA_ARGS__)
+#else
+#define dtls_debug(...)
 #endif
 
 #endif /* _DTLS_DEBUG_H_ */

@@ -45,18 +45,7 @@ extern "C" {
  * may need to change this, or define these things yourself in this
  * file.
  */
-#include <sys/types.h>
 #include "tinydtls.h"
-
-#ifdef IS_WINDOWS
-#include <stdint.h>
-
-typedef uint8_t u_int8_t;
-typedef uint16_t u_int16_t;
-typedef uint32_t u_int32_t;
-typedef uint64_t u_int64_t;
-
-#endif
 
 #ifdef SHA2_USE_INTTYPES_H
 
@@ -149,7 +138,7 @@ char* dtls_sha256_data(const uint8_t*, size_t, char[DTLS_SHA256_DIGEST_STRING_LE
 #ifdef WITH_SHA384
 void dtls_sha384_init(dtls_sha384_ctx*);
 void dtls_sha384_update(dtls_sha384_ctx*, const uint8_t*, size_t);
-void dtls_sha384_final(uint8_t[DTLS_SHA384_DIGEST_LENGTH], dtls_sha384_ctx*);
+void dtls_sha384_final(uint8_t[DTLS_SHA384_DIGEST_LENGTH], SHA384_CTX*);
 char* dtls_sha384_end(dtls_sha384_ctx*, char[DTLS_SHA384_DIGEST_STRING_LENGTH]);
 char* dtls_sha384_data(const uint8_t*, size_t, char[DTLS_SHA384_DIGEST_STRING_LENGTH]);
 #endif

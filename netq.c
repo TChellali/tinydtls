@@ -28,11 +28,7 @@
 #endif
 #endif
 
-#ifdef WITH_ZEPHYR
-LOG_MODULE_DECLARE(TINYDTLS, CONFIG_TINYDTLS_LOG_LEVEL);
-#endif /* WITH_ZEPHYR */
-
-#if !(defined (WITH_CONTIKI)) && !(defined (RIOT_VERSION))
+#ifndef WITH_CONTIKI
 #include <stdlib.h>
 
 static inline netq_t *
@@ -45,7 +41,7 @@ netq_free_node(netq_t *node) {
   free(node);
 }
 
-#elif defined (WITH_CONTIKI) /* WITH_CONTIKI */
+#else /* WITH_CONTIKI */
 #include "memb.h"
 
 MEMB(netq_storage, netq_t, NETQ_MAXCNT);
@@ -64,29 +60,6 @@ void
 netq_init() {
   memb_init(&netq_storage);
 }
-
-#elif defined (RIOT_VERSION)
-# include <memarray.h>
-
-netq_t netq_storage_data[NETQ_MAXCNT];
-memarray_t netq_storage;
-
-static inline netq_t *
-netq_malloc_node(size_t size) {
-  (void) size;
-  return (netq_t *)memarray_alloc(&netq_storage);
-}
-
-static inline void
-netq_free_node(netq_t *node) {
-  memarray_free(&netq_storage, node);
-}
-
-void
-netq_init(void) {
-  memarray_init(&netq_storage, netq_storage_data, sizeof(netq_t), NETQ_MAXCNT);
-}
-
 #endif /* WITH_CONTIKI */
 
 int 
@@ -97,8 +70,7 @@ netq_insert_node(netq_t **queue, netq_t *node) {
   assert(node);
 
   p = *queue;
-  /* comparison considering 32bit overflow */
-  while(p && DTLS_IS_BEFORE_TIME(p->t, node->t)) {
+  while(p && p->t <= node->t) {
     assert(p != node);
     if (p == node)
       return 0;
@@ -148,11 +120,13 @@ netq_node_new(size_t size) {
   netq_t *node;
   node = netq_malloc_node(size);
 
-  if (node) {
-    memset(node, 0, sizeof(netq_t));
-  } else {
+#ifndef NDEBUG
+  if (!node)
     dtls_warn("netq_node_new: malloc\n");
-  }
+#endif
+
+  if (node)
+    memset(node, 0, sizeof(netq_t));
 
   return node;
 }

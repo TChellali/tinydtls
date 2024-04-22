@@ -56,6 +56,7 @@ typedef enum {
 #define DTLS_EVENT_CONNECT        0x01DC /**< initiated handshake */
 #define DTLS_EVENT_CONNECTED      0x01DE /**< handshake or re-negotiation
 					  * has finished */
+#define DTLS_EVENT_RENEGOTIATE    0x01DF /**< re-negotiation has started */
 
 static inline int
 dtls_alert_create(dtls_alert_level_t level, dtls_alert_t desc)
@@ -67,18 +68,6 @@ static inline int
 dtls_alert_fatal_create(dtls_alert_t desc)
 {
   return dtls_alert_create(DTLS_ALERT_LEVEL_FATAL, desc);
-}
-
-/**
- * Test, if error code represents an alert.
- *
- * \param err error code
- * \return 0 (false), if not, not 0 (true), if it represents an alert.
- */
-static inline int
-dtls_is_alert(int err)
-{
-  return (err < -(1 << 8) && err > -(3 << 8));
 }
 
 #endif /* _DTLS_ALERT_H_ */

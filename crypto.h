@@ -32,7 +32,9 @@
 
 /* TLS_PSK_WITH_AES_128_CCM_8 */
 #define DTLS_MAC_KEY_LENGTH    0
+#ifndef DTLS_KEY_LENGTH
 #define DTLS_KEY_LENGTH        16 /* AES-128 */
+#endif
 #define DTLS_BLK_LENGTH        16 /* AES-128 */
 #define DTLS_MAC_LENGTH        DTLS_HMAC_DIGEST_SIZE
 #define DTLS_IV_LENGTH         4  /* length of nonce_explicit */
@@ -49,14 +51,6 @@
 #define DTLS_MASTER_SECRET_LENGTH 48
 #define DTLS_RANDOM_LENGTH 32
 
-/** Type of index in cipher parameter table */
-typedef uint8_t dtls_cipher_index_t;
-/** Index in cipher parameter table for NULL cipher */
-#define DTLS_CIPHER_INDEX_NULL 0
-
-/** Maximum number of cipher suites */
-#define DTLS_MAX_CIPHER_SUITES 4
-
 typedef enum { AES128=0 
 } dtls_crypto_alg;
 
@@ -67,9 +61,6 @@ typedef enum {
 /** Crypto context for TLS_PSK_WITH_AES_128_CCM_8 cipher suite. */
 typedef struct {
   rijndael_ctx ctx;		       /**< AES-128 encryption context */
-  uint8_t tag_length;                  /**< length of MAC tag (=M) */
-  uint8_t l;                           /**< number of bytes in length
-                                        *   field (= L) */
 } aes128_ccm_t;
 
 typedef struct dtls_cipher_context_t {
@@ -87,9 +78,7 @@ typedef struct {
 
 /* This is the maximal supported length of the psk client identity and psk
  * server identity hint */
-#ifndef DTLS_PSK_MAX_CLIENT_IDENTITY_LEN
 #define DTLS_PSK_MAX_CLIENT_IDENTITY_LEN   32
-#endif /* DTLS_PSK_MAX_CLIENT_IDENTITY_LEN */
 
 /* This is the maximal supported length of the pre-shared key. */
 #define DTLS_PSK_MAX_KEY_LEN DTLS_KEY_LENGTH
@@ -100,20 +89,14 @@ typedef struct {
 } dtls_handshake_parameters_psk_t;
 
 typedef struct {
-    uint64_t cseq;        /**< current read sequence number */
-    /**
-     * bitfield of already received sequence numbers.
-     * B0 := cseqn, B1 := cseqn -1, ..., B63 := cseqn - 63
-     * Initially 0, set to 1 (B0) with the first received message of the epoch,
-     * or -1 (B0..B63) with a verified ClientHello (server-side only)
-     */
+    uint64_t cseq;
     uint64_t bitfield;
 } seqnum_t;
 
 typedef struct {
   dtls_compression_t compression;	/**< compression method */
 
-  dtls_cipher_index_t cipher_index;	/**< internal index for cipher_suite_params, DTLS_CIPHER_INDEX_NULL for TLS_NULL_WITH_NULL_NULL */
+  dtls_cipher_t cipher;		/**< cipher type */
   uint16_t epoch;	     /**< counter for cipher state changes*/
   uint64_t rseq;	     /**< sequence number of last record sent */
 
@@ -130,19 +113,6 @@ typedef struct {
 
 struct netq_t;
 
-/**
- * Set of user parameters used by the handshake.
- */
-typedef struct dtls_user_parameters_t {
-  /**
-   * The list of cipher suites.
-   * The list must be terminated by TLS_NULL_WITH_NULL_NULL.
-   */
-  dtls_cipher_t cipher_suites[DTLS_MAX_CIPHER_SUITES + 1];
-  unsigned int force_extended_master_secret:1; /** force extended master secret extension (RFC7627) */
-  unsigned int force_renegotiation_info:1;     /** force renegotiation info extension (RFC5746) */
-} dtls_user_parameters_t;
-
 typedef struct {
   union {
     struct random_t {
@@ -156,11 +126,8 @@ typedef struct {
   dtls_hs_state_t hs_state;  /**< handshake protocol status */
 
   dtls_compression_t compression;		/**< compression method */
-  dtls_user_parameters_t user_parameters;	/**< user parameters */
-  dtls_cipher_index_t cipher_index;		/**< internal index for cipher_suite_params, DTLS_CIPHER_INDEX_NULL for TLS_NULL_WITH_NULL_NULL */
+  dtls_cipher_t cipher;		/**< cipher type */
   unsigned int do_client_auth:1;
-  unsigned int extended_master_secret:1;
-  unsigned int renegotiation_info:1;
   union {
 #ifdef DTLS_ECC
     dtls_handshake_parameters_ecdsa_t ecdsa;
@@ -228,15 +195,11 @@ typedef struct {
  * \param h       Identifier of the hash function to use.
  * \param key     The secret.
  * \param keylen  Length of \p key.
- * \param label    The label.
- * \param labellen Length of \p label.
- * \param random1 The random pt 1. 
- * \param random1len Length of \p random1.
- * \param random2 The random pt 2. 
- * \param random2len Length of \p random2.
+ * \param seed    The seed. 
+ * \param seedlen Length of \p seed.
  * \param buf     Output buffer where the result is XORed into
- * \param buflen  The available space for \p buf
- *
+ *                The buffe must be capable to hold at least
+ *                \p buflen bytes.
  * \return The actual number of bytes written to \p buf or 0
  * on error.
  */
@@ -279,101 +242,31 @@ void dtls_mac(dtls_hmac_context_t *hmac_ctx,
 	      const unsigned char *packet, size_t length,
 	      unsigned char *buf);
 
-/**
- * Represents AEAD parameters for dtls_encrypt_params().
- */
-typedef struct {
-  const uint8_t *nonce;         /**< must be exactly 15 - l bytes */
-  uint8_t tag_length;           /**< the MAC tag length (M) */
-  uint8_t l;                    /**< number of bytes in the length
-                                 *   field (L) */
-} dtls_ccm_params_t;
-
-/**
- * Encrypts the specified \p src of given \p length, writing the
- * result to \p buf. The cipher implementation may add more data to
- * the result buffer such as an initialization vector or padding
- * (e.g. for block ciphers in CBC mode). The caller therefore must
- * ensure that \p buf provides sufficient storage to hold the result.
- * Usually this means ( 2 + \p length / blocksize ) * blocksize.  The
- * function returns a value less than zero on error or otherwise the
- * number of bytes written. The provided \p src and \p buf may overlap.
- *
- * \param params AEAD parameters: Nonce, M and L.
- * \param src    The data to encrypt.
- * \param length The actual size of of \p src.
- * \param buf    The result buffer. \p src and \p buf must not
- *               overlap.
- * \param key     The key to use
- * \param keylen  The length of the key
- * \param aad    additional data for AEAD ciphers
- * \param aad_length actual size of @p aad
- * \return The number of encrypted bytes on success, less than zero
- *         otherwise.
- */
-int dtls_encrypt_params(const dtls_ccm_params_t *params,
-                        const unsigned char *src, size_t length,
-                        unsigned char *buf,
-                        const unsigned char *key, size_t keylen,
-                        const unsigned char *aad, size_t aad_length);
-
 /** 
  * Encrypts the specified \p src of given \p length, writing the
  * result to \p buf. The cipher implementation may add more data to
  * the result buffer such as an initialization vector or padding
- * (e.g. for block ciphers in CBC mode). The caller therefore must
+ * (e.g. for block cipers in CBC mode). The caller therefore must
  * ensure that \p buf provides sufficient storage to hold the result.
  * Usually this means ( 2 + \p length / blocksize ) * blocksize.  The
  * function returns a value less than zero on error or otherwise the
- * number of bytes written. The provided \p src and \p buf may overlap.
+ * number of bytes written.
  *
+ * \param ctx    The cipher context to use.
  * \param src    The data to encrypt.
  * \param length The actual size of of \p src.
- * \param buf    The result buffer.
- * \param nonce  The nonce used for encryption. Must be exactly 13
- *               bytes, because L is set to 2.
- * \param key    The key to use
- * \param keylen The length of the key
+ * \param buf    The result buffer. \p src and \p buf must not 
+ *               overlap.
  * \param aad    additional data for AEAD ciphers
  * \param aad_length actual size of @p aad
- *
  * \return The number of encrypted bytes on success, less than zero
  *         otherwise. 
- *
- * \deprecated dtls_encrypt() always sets M=8, L=2. Use
- *             dtls_encrypt_params() instead.
  */
 int dtls_encrypt(const unsigned char *src, size_t length,
 		 unsigned char *buf,
-		 const unsigned char *nonce,
-		 const unsigned char *key, size_t keylen,
+		 unsigned char *nounce,
+		 unsigned char *key, size_t keylen,
 		 const unsigned char *aad, size_t aad_length);
-
-/**
- * Decrypts the given buffer \p src of given \p length, writing the
- * result to \p buf. The function returns \c -1 in case of an error,
- * or the number of bytes written. Note that for block ciphers, \p
- * length must be a multiple of the cipher's block size. A return
- * value between \c 0 and the actual length indicates that only \c n-1
- * block have been processed. The provided \p src and \p buf may overlap.
- *
- * \param params AEAD parameters: Nonce, M and L.
- * \param src     The input buffer to decrypt.
- * \param length  The length of the input buffer.
- * \param buf     The result buffer.
- * \param key     The key to use
- * \param keylen  The length of the key
- * \param aad     additional authentication data for AEAD ciphers
- * \param aad_length actual size of @p aad
- *
- * \return Less than zero on error, the number of decrypted bytes
- *         otherwise.
- */
-int dtls_decrypt_params(const dtls_ccm_params_t *params,
-                        const unsigned char *src, size_t length,
-                        unsigned char *buf,
-                        const unsigned char *key, size_t keylen,
-                        const unsigned char *aad, size_t aad_length);
 
 /** 
  * Decrypts the given buffer \p src of given \p length, writing the
@@ -381,27 +274,22 @@ int dtls_decrypt_params(const dtls_ccm_params_t *params,
  * or the number of bytes written. Note that for block ciphers, \p
  * length must be a multiple of the cipher's block size. A return
  * value between \c 0 and the actual length indicates that only \c n-1
- * block have been processed. The provided \p src and \p buf may overlap.
+ * block have been processed. Unlike dtls_encrypt(), the source
+ * and destination of dtls_decrypt() may overlap. 
  * 
+ * \param ctx     The cipher context to use.
  * \param src     The buffer to decrypt.
- * \param length  The length of the input buffer.
+ * \param length  The length of the input buffer. 
  * \param buf     The result buffer.
- * \param nonce  The nonce used for encryption. Must be exactly 13
- *               bytes, because L is set to 2.
- * \param key     The key to use
- * \param keylen  The key to use
- * \param a_data  additional authentication data for AEAD ciphers
- * \param a_data_length actual size of @p aad
+ * \param aad     additional authentication data for AEAD ciphers
+ * \param aad_length actual size of @p aad
  * \return Less than zero on error, the number of decrypted bytes 
  *         otherwise.
- *
- * \deprecated dtls_decrypt() always sets M=8, L=2. Use
- *             dtls_decrypt_params() instead.
  */
 int dtls_decrypt(const unsigned char *src, size_t length,
 		 unsigned char *buf,
-		 const unsigned char *nonce,
-		 const unsigned char *key, size_t keylen,
+		 unsigned char *nounce,
+		 unsigned char *key, size_t keylen,
 		 const unsigned char *a_data, size_t a_data_length);
 
 /* helper functions */
@@ -414,7 +302,6 @@ int dtls_decrypt(const unsigned char *src, size_t length,
  * @param key    The shared key.
  * @param keylen Length of @p key in bytes.
  * @param result The derived pre master secret.
- * @param result_len The length of derived pre master secret.
  * @return The actual length of @p result.
  */
 int dtls_psk_pre_master_secret(unsigned char *key, size_t keylen,
@@ -456,7 +343,7 @@ int dtls_ecdsa_verify_sig(const unsigned char *pub_key_x,
 			  const unsigned char *keyx_params, size_t keyx_params_size,
 			  unsigned char *result_r, unsigned char *result_s);
 
-int dtls_ec_key_asn1_from_uint32(const uint32_t *key, size_t key_size,
+int dtls_ec_key_from_uint32_asn1(const uint32_t *key, size_t key_size,
 				 unsigned char *buf);
 
 
